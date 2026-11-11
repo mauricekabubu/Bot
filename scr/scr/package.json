@@ -1,0 +1,29 @@
+{
+  "name": "atom-maurice-ai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Individual-chat-only WhatsApp AI assistant",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --test tests/**/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^1.11.0",
+    "@wppconnect-team/wppconnect": "^2.3.6",
+    "better-sqlite3": "^12.2.0",
+    "dotenv": "^17.2.1",
+    "p-queue": "^8.1.0",
+    "puppeteer-core": "^24.43.1",
+    "zod": "^3.24.1"
+  },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "puppeteer@18.2.1": true,
+    "protobufjs": true
+  }
+}
