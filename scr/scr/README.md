@@ -1,12 +1,12 @@
 # Atom Maurice AI
 
-Atom Maurice AI is a WhatsApp Web assistant for individual chats only—never groups. It uses WPPConnect, Gemini, and SQLite, with a Kenyan conversational voice.
+Atom Maurice AI is a WhatsApp Web assistant for individual chats only—never groups. It uses WPPConnect, interchangeable AI providers, and SQLite, with a Kenyan conversational voice.
 
 ## What it does
 
 - Strictly rejects groups (`@g.us`), broadcasts/statuses, self messages, and unsupported identifiers before any AI request or memory write.
 - Queues messages per user, deduplicates incoming IDs, rate-limits users, and isolates SQLite memory per WhatsApp identifier.
-- Uses Gemini through the official `@google/genai` SDK; when not configured it responds safely instead of crashing.
+- Routes text conversations through Gemini, OpenAI, Anthropic Claude, or an optional configured Ollama server. Provider failures fail over without rebuilding or changing the WhatsApp delivery pipeline.
 - Includes deterministic calculator support (`calc 12 * 4`), a SQLite reminder foundation, optional web search integration, and safe document metadata validation.
 - Stores supported incoming media only from verified individual chats, with per-file and total-storage limits. PDFs, TXT, and DOCX are additionally validated and staged temporarily; document text extraction is not implemented, so uploads are acknowledged but not analyzed.
 
@@ -23,7 +23,28 @@ npm test
 npm start
 ```
 
-Set `GEMINI_API_KEY` in `.env`; `gemini-3.8-flash` is the default model. On first start, scan the QR code in the terminal from WhatsApp: **Linked devices → Link a device**. WPPConnect stores its isolated Chrome profile under `%LOCALAPPDATA%\Atom\whatsapp-session\session-atom-maurice-wppconnect` to keep browser storage out of OneDrive sync.
+Set at least one provider credential in `.env`: `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. Ollama is available when `OLLAMA_BASE_URL` points to a running Ollama server. Model IDs are selected with `GEMINI_MODEL`, `OPENAI_MODEL`, `ANTHROPIC_MODEL`, and `OLLAMA_MODEL`. Automatic routing first tries `GEMINI_MODEL`, then distinct models from the comma-separated `GEMINI_FALLBACK_MODELS`, followed by configured providers in `AI_PROVIDER_PRIORITY` order (default: OpenAI → Claude → Ollama). Providers without credentials are skipped. Set `AI_ADMIN_CONTACTS` to a comma-separated list of exact private WhatsApp IDs (`@c.us` or verified `@lid`) to authorize model commands. The bot never displays credentials. On first start, scan the QR code in the terminal from WhatsApp: **Linked devices → Link a device**. WPPConnect stores its isolated Chrome profile under `%LOCALAPPDATA%\Atom\whatsapp-session\session-atom-maurice-wppconnect` to keep browser storage out of OneDrive sync.
+
+## AI provider routing
+
+The SQLite database persists the global routing mode, provider priorities, per-contact preferences, cooldown/circuit state, failover history, and aggregate token/request statistics. Gemini remains the default provider when configured; existing API key and model settings are preserved. Gemini fallback models are attempted once each (never repeating the same Gemini model) before switching providers. Invalid credentials skip the remaining Gemini models, while temporary failures and rate limits move to the next Gemini model when configured. Other providers honor `Retry-After` and use bounded retries for temporary errors. Credentials remain in environment variables and are not written to SQLite or logged.
+
+Authorized administrators can send these commands in a verified private chat:
+
+```text
+/model
+/model status
+/model auto
+/model gemini
+/model openai
+/model claude
+/model ollama
+/model priority gemini,openai,claude,ollama
+/model contact openai
+/model contact auto
+```
+
+`/model <provider>` changes the persistent global preferred provider; other eligible providers remain failover options. `/model priority <provider,...>` sets a persistent fallback order. `/model contact <provider|auto>` sets only the administrator’s own contact preference. Configure provider credentials/models and administrator IDs in `.env`, then restart the bot. Mock-provider tests do not make real provider requests.
 
 To reset the linked account, stop the process and remove only `%LOCALAPPDATA%\Atom\whatsapp-session\session-atom-maurice-wppconnect` in Explorer, then start again. Do not delete the whole `data` folder if you want to retain memories and reminders. The previous WhatsApp profiles are left untouched.
 
