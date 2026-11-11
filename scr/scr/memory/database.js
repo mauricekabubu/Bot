@@ -221,6 +221,57 @@ const migrations = [
         ON inbound_message_events(status, started_at);
     `);
   },
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_model_config (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        mode TEXT NOT NULL CHECK(mode IN ('auto', 'manual')),
+        provider TEXT,
+        model TEXT,
+        priorities_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ai_contact_preferences (
+        contact_id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL CHECK(mode IN ('auto', 'manual')),
+        provider TEXT,
+        model TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ai_provider_state (
+        provider TEXT PRIMARY KEY,
+        availability TEXT NOT NULL CHECK(availability IN (
+          'available', 'cooldown', 'circuit_open', 'misconfigured', 'unavailable'
+        )),
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        cooldown_until TEXT,
+        circuit_open_until TEXT,
+        last_error_code TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ai_model_usage (
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        requests INTEGER NOT NULL DEFAULT 0,
+        successes INTEGER NOT NULL DEFAULT 0,
+        failures INTEGER NOT NULL DEFAULT 0,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        last_used_at TEXT NOT NULL,
+        PRIMARY KEY(provider, model)
+      );
+      CREATE TABLE IF NOT EXISTS ai_failover_events (
+        id INTEGER PRIMARY KEY,
+        correlation_id TEXT NOT NULL,
+        from_provider TEXT NOT NULL,
+        to_provider TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX ai_failover_events_recent
+        ON ai_failover_events(created_at DESC);
+    `);
+  },
 ];
 
 export function migrateDatabase(db) {
