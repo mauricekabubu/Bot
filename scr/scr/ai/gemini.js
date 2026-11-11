@@ -2,27 +2,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { systemInstruction } from "./prompts.js";
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function isRetryable(error) {
-  const status = error?.status ?? error?.code;
-
-  // Retry rate limits, timeouts, server errors and common
-  // temporary network failures. Do not retry invalid API keys.
-  if ([408, 429, 500, 502, 503, 504].includes(Number(status))) {
-    return true;
-  }
-
-  const message = String(error?.message ?? "").toLowerCase();
-
-  return (
-    message.includes("timeout") ||
-    message.includes("econnreset") ||
-    message.includes("econnrefused") ||
-    message.includes("network")
-  );
-}
-
 function safeErrorMessage(error, sensitiveValues = []) {
   let message = String(error?.message || error).split(/\r?\n/, 1)[0];
   for (const value of sensitiveValues.filter((item) => typeof item === "string" && item.length > 0)) {
@@ -39,11 +18,40 @@ export class GeminiProvider {
     this.logger = logger;
 
     this.client = config.GEMINI_API_KEY
-      ? new GoogleGenAI({ apiKey: config.GEMINI_API_KEY, timeout: 60_000, maxRetries: 0 })
+      ? new GoogleGenAI({
+          apiKey: config.GEMINI_API_KEY,
+          timeout: config.AI_PROVIDER_TIMEOUT_MS || 60_000,
+          maxRetries: 0,
+        })
       : null;
   }
 
-  async generate(context, { eventUuid } = {}) {
+  get id() {
+    return "gemini";
+  }
+
+  get isConfigured() {
+    return Boolean(this.client);
+  }
+
+  get models() {
+    const fallbacks = Array.isArray(this.config.GEMINI_FALLBACK_MODELS)
+      ? this.config.GEMINI_FALLBACK_MODELS
+      : String(this.config.GEMINI_FALLBACK_MODELS || "").split(",");
+    return [...new Set([
+      this.config.GEMINI_MODEL,
+      ...fallbacks.map((model) => String(model).trim()).filter(Boolean),
+    ])];
+  }
+
+  get capabilities() {
+    return ["text", "conversation"];
+  }
+
+  async generate(
+    context,
+    { eventUuid, model = this.config.GEMINI_MODEL, normalized = false } = {},
+  ) {
     if (!this.client) {
       throw new Error("GEMINI_NOT_CONFIGURED");
     }
@@ -76,65 +84,62 @@ export class GeminiProvider {
 
     const contents = [...history, currentMessage];
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const startedAt = Date.now();
-      this.logger?.info("gemini_request_started", {
-        eventUuid,
-        model: this.config.GEMINI_MODEL,
-        attempt: attempt + 1,
+    const startedAt = Date.now();
+    this.logger?.info("gemini_request_started", {
+      eventUuid,
+      model,
+    });
+    try {
+      const response = await this.client.models.generateContent({
+        model,
+        contents,
+        config: {
+          systemInstruction,
+          maxOutputTokens: context.maxOutputTokens ?? this.config.MAX_OUTPUT_TOKENS,
+          temperature: context.temperature ?? this.config.TEMPERATURE,
+        },
       });
-      try {
-        const response = await this.client.models.generateContent({
-          model: this.config.GEMINI_MODEL,
-          contents,
-          config: {
-            systemInstruction,
-            maxOutputTokens: this.config.MAX_OUTPUT_TOKENS,
-            temperature: this.config.TEMPERATURE,
-          },
-        });
 
-        const reply = response.text?.trim();
+      const reply = response.text?.trim();
 
-        if (!reply) {
-          throw new Error("GEMINI_EMPTY_RESPONSE");
-        }
-
-        this.logger?.info("gemini_response_received", {
-          eventUuid,
-          model: this.config.GEMINI_MODEL,
-          durationMs: Date.now() - startedAt,
-          responseLength: reply.length,
-          attempt: attempt + 1,
-        });
-        return reply;
-      } catch (error) {
-        this.logger?.warn("gemini_request_failed", {
-          eventUuid,
-          model: this.config.GEMINI_MODEL,
-          durationMs: Date.now() - startedAt,
-          attempt: attempt + 1,
-          retryable: isRetryable(error),
-          errorName: error?.name || "Error",
-          ...(error?.code ? { errorCode: String(error.code).slice(0, 100) } : {}),
-          errorMessage: safeErrorMessage(error, [
-            context.text,
-            ...(context.history || []).map((message) => message.content),
-            ...(context.memories || []),
-            this.config.GEMINI_API_KEY,
-          ]),
-        });
-        const finalAttempt = attempt === 2;
-
-        if (finalAttempt || !isRetryable(error)) {
-          throw error;
-        }
-
-        const delay = 500 * 2 ** attempt + Math.random() * 300;
-        await wait(delay);
+      if (!reply) {
+        throw new Error("GEMINI_EMPTY_RESPONSE");
       }
-    }
 
-    throw new Error("GEMINI_REQUEST_FAILED");
+      this.logger?.info("gemini_response_received", {
+        eventUuid,
+        model,
+        durationMs: Date.now() - startedAt,
+        responseLength: reply.length,
+      });
+      if (!normalized) return reply;
+      return {
+        text: reply,
+        provider: this.id,
+        model: response.modelVersion || model,
+        usage: {
+          inputTokens: response.usageMetadata?.promptTokenCount || 0,
+          outputTokens: response.usageMetadata?.candidatesTokenCount || 0,
+        },
+        finishReason: response.candidates?.[0]?.finishReason || null,
+        latencyMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      this.logger?.warn("gemini_request_failed", {
+        eventUuid,
+        model,
+        durationMs: Date.now() - startedAt,
+        retryable: false,
+        errorName: error?.name || "Error",
+        ...(error?.code ? { errorCode: String(error.code).slice(0, 100) } : {}),
+        errorMessage: safeErrorMessage(error, [
+          context.text,
+          ...(context.history || []).map((message) => message.content),
+          ...(context.memories || []),
+          this.config.GEMINI_API_KEY,
+        ]),
+      });
+      throw error;
+    }
   }
 }
