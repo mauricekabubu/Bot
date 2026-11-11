@@ -1,0 +1,10 @@
+# Application secrets and runtime data (the project itself is under scr/)
+scr/.env
+scr/node_modules/
+data/
+logs/
+temp/**
+!temp/.gitkeep
+*.db
+*.db-*
+coverage/
