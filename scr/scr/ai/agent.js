@@ -13,11 +13,20 @@ function safeErrorMessage(error, sensitiveValues = []) {
 }
 
 export class Agent {
-  constructor({ conversation, longTerm, gemini, tools, logger, confirmations = new PendingConfirmationStore() }) {
+  constructor({
+    conversation,
+    longTerm,
+    gemini,
+    router,
+    tools,
+    logger,
+    confirmations = new PendingConfirmationStore(),
+  }) {
     Object.assign(this, {
       conversation,
       longTerm,
       gemini,
+      router,
       tools,
       logger,
       confirmations
@@ -114,10 +123,23 @@ export class Agent {
 
     // Generate AI response
     let reply;
+    let provider;
+    let model;
+    let usage;
     const generationStartedAt = Date.now();
 
     try {
-      reply = await this.gemini.generate(context, { eventUuid });
+      if (this.router) {
+        const generated = await this.router.generate(context, { userId, eventUuid });
+        reply = generated.text;
+        provider = generated.provider;
+        model = generated.model;
+        usage = generated.usage;
+      } else {
+        reply = await this.gemini.generate(context, { eventUuid });
+        model = this.gemini?.config?.GEMINI_MODEL;
+        provider = "gemini";
+      }
 
       if (typeof reply !== "string" || !reply.trim()) {
         throw new Error("Empty AI response.");
@@ -125,19 +147,26 @@ export class Agent {
     } catch (error) {
       this.logger?.error("ai_response_generation_failed", {
         eventUuid,
-        model: this.gemini?.config?.GEMINI_MODEL,
+        provider,
+        model: model || this.gemini?.config?.GEMINI_MODEL,
         errorName: error?.name || "Error",
         ...(error?.code ? { errorCode: String(error.code).slice(0, 100) } : {}),
-        errorMessage: safeErrorMessage(error, [input, this.gemini?.config?.GEMINI_API_KEY]),
+        errorMessage: safeErrorMessage(error, [
+          input,
+          this.gemini?.config?.GEMINI_API_KEY,
+        ]),
       });
-      if (/not[_\s]+configured/i.test(String(error?.message))) {
+      if (error?.code === "NO_AI_PROVIDERS_CONFIGURED") {
+        reply = "AI providers hawijaconfigurewa bado. Configure at least one provider, then restart.";
+      } else if (!this.router && /not[_\s]+configured/i.test(String(error?.message))) {
         reply = "Niko ready, lakini Gemini haijaconfigurewa bado. Ongeza GEMINI_API_KEY kwa .env, then restart.";
       } else {
         reply = "Pole, AI service imepata issue ya muda. Jaribu tena kidogo.";
       }
       this.logger?.info("ai_response_generated", {
         eventUuid,
-        model: this.gemini?.config?.GEMINI_MODEL,
+        provider,
+        model: model || this.gemini?.config?.GEMINI_MODEL,
         responseLength: reply.length,
         responseKind: "fallback",
         durationMs: Date.now() - generationStartedAt,
@@ -147,7 +176,10 @@ export class Agent {
 
     this.logger?.info("ai_response_generated", {
       eventUuid,
-      model: this.gemini?.config?.GEMINI_MODEL,
+      provider,
+      model: model || this.gemini?.config?.GEMINI_MODEL,
+      inputTokens: usage?.inputTokens || 0,
+      outputTokens: usage?.outputTokens || 0,
       responseLength: reply.length,
       durationMs: Date.now() - generationStartedAt,
     });
