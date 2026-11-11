@@ -4,6 +4,21 @@ import { z } from 'zod';
 
 const schema = z.object({
   GEMINI_API_KEY: z.string().optional(), GEMINI_MODEL: z.string().default('gemini-3.8-flash'),
+  GEMINI_FALLBACK_MODELS: z.string().default('').transform((value) =>
+    [...new Set(value.split(',').map((model) => model.trim()).filter(Boolean))]
+  ),
+  OPENAI_API_KEY: z.string().optional(), OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default('claude-3-5-haiku-latest'),
+  OLLAMA_BASE_URL: z.preprocess(
+    (value) => value === '' ? undefined : value,
+    z.string().url().optional(),
+  ),
+  OLLAMA_MODEL: z.string().default('llama3.2'),
+  AI_ADMIN_CONTACTS: z.string().default(''),
+  AI_PROVIDER_PRIORITY: z.string().default('gemini,openai,claude,ollama'),
+  AI_MAX_FAILOVER_ATTEMPTS: z.coerce.number().int().min(0).max(3).default(3),
+  AI_PROVIDER_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(60000),
   MAX_OUTPUT_TOKENS: z.coerce.number().int().min(32).max(2048).default(500),
   TEMPERATURE: z.coerce.number().min(0).max(2).default(0.7),
   DATABASE_PATH: z.string().default('../data/atom-maurice.db'),
