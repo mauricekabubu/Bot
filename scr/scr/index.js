@@ -7,6 +7,12 @@ import { ConversationMemory } from "./memory/conversationMemory.js";
 import { LongTermMemory } from "./memory/longTermMemory.js";
 
 import { GeminiProvider } from "./ai/gemini.js";
+import {
+  AnthropicProvider,
+  OllamaProvider,
+  OpenAIProvider,
+} from "./ai/providers.js";
+import { ModelRouter } from "./ai/modelRouter.js";
 import { Agent } from "./ai/agent.js";
 
 import { createToolRegistry } from "./tools/registry.js";
@@ -35,12 +41,27 @@ const cliArgs = process.argv.slice(2);
 const conversation = new ConversationMemory(db);
 const longTerm = new LongTermMemory(db);
 const gemini = new GeminiProvider(config, log);
+const modelRouter = new ModelRouter({
+  db,
+  providers: [
+    gemini,
+    new OpenAIProvider(config),
+    new AnthropicProvider(config),
+    new OllamaProvider(config),
+  ],
+  logger: log,
+  priorities: config.AI_PROVIDER_PRIORITY,
+  maxFailoverAttempts: config.AI_MAX_FAILOVER_ATTEMPTS,
+  maxOutputTokens: config.MAX_OUTPUT_TOKENS,
+  temperature: config.TEMPERATURE,
+});
 const tools = createToolRegistry(config);
 
 const agent = new Agent({
   conversation,
   longTerm,
   gemini,
+  router: modelRouter,
   tools,
   logger: log,
 });
@@ -90,6 +111,8 @@ const handler = createMessageHandler({
   newsletterStore,
   mediaStore,
   inboundStore,
+  modelRouter,
+  adminContacts: config.AI_ADMIN_CONTACTS.split(",").map((contact) => contact.trim()),
 });
 
 // Initialize WhatsApp
